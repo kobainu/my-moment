@@ -1,48 +1,71 @@
-version: 2
+version: 2.1
+orbs:
+  ruby: circleci/ruby@0.1.2
+
 jobs:
   build:
-    machine:
-      image: circleci/classic:edge
+    docker:
+      - image: circleci/ruby:3.0.5-node-browsers-legacy #rubyのversionに合ったコンテナ
+        environment:
+          - BUNDLER_VERSION: 2.2.33 # これがないとbundle installできない
+          - RAILS_ENV: 'test'
+          - DB_HOST: 127.0.0.1
+      - image: circleci/mysql:8.0
+        environment:
+          - MYSQL_ALLOW_EMPTY_PASSWORD: 'true'
+          - MYSQL_USER: root
+          - MYSQL_DB: ci_test # testのDB名指定
+    working_directory: ~/repo
     steps:
+      # CI環境上の working_directory の値の場所にGitリポジトリをコピーする。
       - checkout
+
+      # dockerコンテナの立ち上げを待つ(これ不要かも…？？？）
       - run:
-          name: Decode dotenv file
-          command: echo ${ENV} | base64 --decode > /home/circleci/project/.env
+          name: wait for database
+          command: dockerize -wait tcp://127.0.0.1:3306 -timeout 5m
+
+      # キャッシュがあれば、リストアする。テスト時間の短縮につながる。keysでリストアするキャッシュを複数指定
       - restore_cache:
           keys:
-            - gem-cache-{{ arch }}-{{ .Branch }}-{{ checksum "Gemfile.lock" }}
-            - gem-cache-{{ arch }}-{{ .Branch }}
-            - gem-cache
+            - v1-dependencies-{{ checksum "Gemfile.lock" }}
+            - v1-dependencies-
+
+      # Bundle install dependencies
       - run:
-          name: docker-compose build
-          command: docker-compose build
-      - run:
-          name: bundle install
-          command: docker-compose run web bundle install --jobs=4 --retry=3
+          name: Install dependencies
+          command: |
+            gem install bundler -v 2.2.33
+            bundle install --path=vendor/bundle --jobs 4 --retry 3
+
+      # キャッシュする
       - save_cache:
-          key: gem-cache-{{ arch }}-{{ .Branch }}-{{ checksum "Gemfile.lock" }}
+          key: v1-dependencies-{{ checksum "Gemfile.lock" }}
           paths:
-            - ~/.bundle
+            - vendor/bundle
+
+      # DBのセットアップ
       - run:
-          name: docker-compose up
-          command: docker-compose up -d
+          name: Database Setup
+          command: |
+            bundle exec rake db:create
+            bundle exec rake db:schema:load
+
+      # rubocopを実行
       - run:
-          name: install dockerize
-          command: wget https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSION/dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz && sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz && rm dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz
-          environment:
-            DOCKERIZE_VERSION: v0.3.0
+          name: Rubocop
+          command: bundle exec rubocop
+
+      # RSpecを実行
       - run:
-          name: Wait for DB
-          command: dockerize -wait tcp://localhost:5432 -timeout 1m
-      - run:
-          name: setup db
-          command: docker-compose run web bin/rails db:create db:migrate
-      - run:
-          name: rubocop
-          command: docker-compose run web bundle exec rubocop
-      - run:
-          name: rspec
-          command: docker-compose run web bin/rspec
-      - run:
-          name: docker-compose down
-          command: docker-compose down
+          name: Run rspec
+          command: |
+            bundle exec rspec --profile 10 \
+                              --format RspecJunitFormatter \
+                              --out test_results/rspec.xml \
+                              --format progress \
+                              $(circleci tests glob "spec/**/*_spec.rb" | circleci tests split --split-by=timings)
+
+      # Save artifacts
+      - store_test_results:
+          path: /tmp/test-results
