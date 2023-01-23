@@ -1,71 +1,62 @@
 version: 2.1
-orbs:
-  ruby: circleci/ruby@0.1.2
-
 jobs:
-  build:
+  rspec:
+    working_directory: ~/my-moment
     docker:
-      - image: circleci/ruby:3.0.5-node-browsers-legacy #rubyのversionに合ったコンテナ
-        environment:
-          - BUNDLER_VERSION: 2.2.33 # これがないとbundle installできない
-          - RAILS_ENV: 'test'
-          - DB_HOST: 127.0.0.1
-      - image: circleci/mysql:8.0
-        environment:
-          - MYSQL_ALLOW_EMPTY_PASSWORD: 'true'
-          - MYSQL_USER: root
-          - MYSQL_DB: ci_test # testのDB名指定
-    working_directory: ~/repo
+      - image: cimg/ruby:3.0.5
+    resource_class: small
     steps:
-      # CI環境上の working_directory の値の場所にGitリポジトリをコピーする。
       - checkout
-
-      # dockerコンテナの立ち上げを待つ(これ不要かも…？？？）
+      - setup_remote_docker:
+          version: 20.10.14
       - run:
-          name: wait for database
-          command: dockerize -wait tcp://127.0.0.1:3306 -timeout 5m
+          name: Setup environment variable
+          command: |
+            echo "export COMPOSE_FILE=docker-compose.ci.yml" >> $BASH_ENV
+      - run:
+          name: Start containers and verify it is working
+          command: |
+            set -x
+            docker-compose up -d
+            docker exec my-moment_app curl -4 --retry 10 --retry-delay 3 --retry-connrefused http://localhost:3000
+      - run:
+          name: Setup database
+          command: |
+            docker-compose exec my-moment bash -c 'yes n | bundle exec rails g spree:install --migrate --seed --sample --auto_accept'
+      - run:
+          name: Run rspec
+          command: docker-compose exec my-moment rspec
 
-      # キャッシュがあれば、リストアする。テスト時間の短縮につながる。keysでリストアするキャッシュを複数指定
+  rubocop:
+    working_directory: ~/my-moment
+    docker:
+      - image: cimg/ruby:3.0.5
+    resource_class: small
+    steps:
+      - checkout
       - restore_cache:
           keys:
-            - v1-dependencies-{{ checksum "Gemfile.lock" }}
-            - v1-dependencies-
-
-      # Bundle install dependencies
+            - gemfiles-{{ .Branch }}-{{ checksum "Gemfile.lock" }}
+            - gemfiles-{{ .Branch }}-
+            - gemfiles-master-
+      - run: bundle config --local path vendor/bundle
       - run:
-          name: Install dependencies
-          command: |
-            gem install bundler -v 2.2.33
-            bundle install --path=vendor/bundle --jobs 4 --retry 3
-
-      # キャッシュする
+          name: bundle install
+          command: bundle check || bundle install --jobs=8 --clean
+      - run:
+          name: Run rubocop
+          command: bundle exec rubocop --parallel
       - save_cache:
-          key: v1-dependencies-{{ checksum "Gemfile.lock" }}
+          key: gemfiles-{{ .Branch }}-{{ checksum "Gemfile.lock" }}
           paths:
             - vendor/bundle
 
-      # DBのセットアップ
-      - run:
-          name: Database Setup
-          command: |
-            bundle exec rake db:create
-            bundle exec rake db:schema:load
-
-      # rubocopを実行
-      - run:
-          name: Rubocop
-          command: bundle exec rubocop
-
-      # RSpecを実行
-      - run:
-          name: Run rspec
-          command: |
-            bundle exec rspec --profile 10 \
-                              --format RspecJunitFormatter \
-                              --out test_results/rspec.xml \
-                              --format progress \
-                              $(circleci tests glob "spec/**/*_spec.rb" | circleci tests split --split-by=timings)
-
-      # Save artifacts
-      - store_test_results:
-          path: /tmp/test-results
+orbs:
+  build-tools: circleci/build-tools@2.6.3
+  jq: circleci/jq@1.9.1
+workflows:
+  version: 2.1
+  build:
+    jobs:
+      - rspec
+      - rubocop
