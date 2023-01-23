@@ -9,11 +9,14 @@ AllCops:
   Exclude:
     - "tmp/**/*"
     - "config/initializers/*"
+    - "config/environments/*"
     - "vendor/**/*"
     - "db/schema.rb"
     - "node_modules/**/*"
     - "db/migrate/*.rb"
     - "bin/*"
+    - "spec/*/*"
+    - "spec/*"
   DisplayCopNames: true
   NewCops: enable
 
