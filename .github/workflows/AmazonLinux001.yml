@@ -1,43 +1,52 @@
-name: Deploy-EC2
+name: EC2 auto deploy
 
 on:
   push:
+  pull_request:
+
+  workflow_dispatch:
 
 jobs:
-#First we will see the application build or not , then we will deploy in EC2
   build:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v2
-    
-    - name: Build the docker_compose
-      run: docker-compose up -d --build
-      
-    - name: Buid the application
-      run: docker-compose exec -T counter_app npm run build
 
-  Deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v2 
-      - name: Deploy in EC2
-        env:
-            PRIVATE_KEY: ${{ secrets.AWS_PRIVATE_KEY  }}
-            HOSTNAME : ${{ secrets.HOSTNAME  }}
-            USER_NAME : ${{ secrets.USER_NAME  }}
-            
+      # IP取得ライブラリをインストール
+      - name: Public IP Install
+        id: ip
+        uses: haythem/public-ip@v1.2
+
+      # BranchをCheckout
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # AWS CLIをインストールする
+      - name: AWS CLI install
         run: |
-          echo "$PRIVATE_KEY" > private_key && chmod 600 private_key
-          ssh -o StrictHostKeyChecking=no -i private_key ${USER_NAME}@${HOSTNAME} '
-          
-            #Now we have got the access of EC2 and we will start the deploy .
-            cd /home/ubuntu/CounterApp &&
-            git checkout feature/initial-setup &&
-            git fetch --all &&
-            git reset --hard origin/feature/initial-setup &&
-            git pull origin feature/initial-setup &&
-            docker-compose -f docker-compose.prod.yml up -d --build 
-          '
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install --update
+          aws --version
+
+      # AWS CLIにキーを設定をする
+      - name: AWS set Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-1
+
+      # デプロイする
+      - name: Deploy
+        run: |
+
+          # SSHのセキュリティグループを開放する
+          aws ec2 authorize-security-group-ingress --group-id ${{ secrets.EC2_SECURITY_GROUP_ID }} --protocol tcp --port 22 --cidr ${{ steps.ip.outputs.ipv4 }}/32
+
+          # SSH接続して、git pullする
+          echo "${{ secrets.GIT_PRIVATE_KEY }}" > private_key
+          chmod 600 private_key
+          ssh -oStrictHostKeyChecking=no ${{ secrets.EC2_USER_NAME }}@${{ secrets.EC2_HOST_NAME }} -i private_key "cd /var/www/my-moment && git fetch --prune && git checkout feature/initial-setup && git pull origin feature/initial-setup"
+
+          # SSHのセキュリティグループを閉じる
+          aws ec2 revoke-security-group-ingress --group-id ${{ secrets.EC2_SECURITY_GROUP_ID }} --protocol tcp --port 22 --cidr ${{ steps.ip.outputs.ipv4 }}/32
