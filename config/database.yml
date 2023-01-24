@@ -8,9 +8,9 @@ default: &default
   encoding: utf8
   collation: utf8_general_ci
   pool: 5
-  host: <%= ENV['MYSQL_HOST'] || 'localhost' %>
+  host: <%= ENV['MYSQL_HOST'] || 'db' %>
   username: <%= ENV['MYSQL_USERNAME'] || 'root' %>
-  password: <%= ENV['MYSQL_PASSWORD'] || '' %>
+  password: <%= ENV['MYSQL_PASSWORD'] || 'password' %>
   socket: /tmp/mysql.sock
 
 development:
