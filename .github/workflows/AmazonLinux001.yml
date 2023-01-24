@@ -1,5 +1,5 @@
 # ワークフロー名(任意)
-name: AmazonLinux001
+name: Deploy-EC2
 
 # トリガーとなる GitHub イベント
 on:
@@ -52,7 +52,7 @@ jobs:
 
           # SSH接続して、git pullする
           echo "${{ secrets.GIT_PRIVATE_KEY }}" > private_key
-          chmod 700 private_key
+          chmod 600 private_key
           ssh -oStrictHostKeyChecking=no ${{ secrets.EC2_USER_NAME }}@${{ secrets.EC2_HOST_NAME }} -i private_key "cd /var/www/my-moment && git pull origin feature/initial-setup"
           # 処理を実行
           
