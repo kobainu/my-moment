@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
 
       # IP取得ライブラリをインストール
@@ -23,8 +23,8 @@ jobs:
       # AWS CLIをインストールする
       - name: AWS CLI install
         run: |
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv1.zip"
+          unzip awscliv1.zip
           sudo ./aws/install --update
           aws --version
 
